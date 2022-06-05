@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: debug
+  name: debug
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debug
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "true"
+        proxy.istio.io/config: |
+          proxyMetadata:
+            OUTPUT_CERTS: /var/run/secrets/istio/certs
+        sidecar.istio.io/userVolume: '[{"name": "istio-certs", "emptyDir": {"medium": "Memory"}}]'
+        sidecar.istio.io/userVolumeMount: '[{"name": "istio-certs", "mountPath": "/var/run/secrets/istio/certs"}]'
+      labels:
+        app: debug
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+        - name: debug
+          image: alpine/curl
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+          args:
+            - -c
+            - sleep 90d
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "true"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "true"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: 250Mi
+              cpu: 100m
+            limits:
+              memory: 500Mi
+              cpu: 200m
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: mtls-carnei-ro
+spec:
+  hosts:
+    - mtls.carnei.ro
+  location: MESH_EXTERNAL
+  ports:
+    - number: 18443
+      name: https
+      protocol: HTTPS
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: mtls-carnei-ro-port80
+spec:
+  hosts:
+    - mtls.carnei.ro
+  http:
+    - match:
+        - port: 80
+      route:
+        - destination:
+            host: mtls.carnei.ro
+            port:
+              number: 18443
+      timeout: 2.500s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: mtls-carnei-ro
+spec:
+  host: mtls.carnei.ro
+  trafficPolicy:
+    portLevelSettings:
+      - port:
+          number: 18443
+        tls:
+          mode: MUTUAL
+          clientCertificate: /var/run/secrets/istio/certs/cert-chain.pem
+          privateKey: /var/run/secrets/istio/certs/key.pem
+          # caCertificates: /etc/ssl/certs/ca-certificates.crt
+          # sni: mtls.carnei.ro
